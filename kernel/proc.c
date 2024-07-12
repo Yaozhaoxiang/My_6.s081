@@ -126,11 +126,14 @@ found:
     release(&p->lock);
     return 0;
   }
-    if((p->alarm_tf = (struct trapframe *)kalloc()) == 0){
-    freeproc(p);
-    release(&p->lock);
-    return 0;
+
+  //分配进程
+  if((p->usyscall = (struct usyscall *)kalloc()) == 0){
+  freeproc(p);
+  release(&p->lock);
+  return 0;
   }
+  p->usyscall->pid=p->pid;
 
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
@@ -145,11 +148,7 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
-  
-  p->alarm_interval = 0;
-  p->alarm_handler = 0;
-  p->ticks_since_alarm = 0;
-  p->in_alarm_handler = 0;
+
   return p;
 }
 
@@ -161,12 +160,12 @@ freeproc(struct proc *p)
 {
   if(p->trapframe)
     kfree((void*)p->trapframe);
-  if(p->alarm_tf)
-    kfree((void*)p->alarm_tf);
-    
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+  if(p->usyscall)
+    kfree((void*)p->usyscall);
+  p->usyscall = 0;
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -176,11 +175,6 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
-
- p->alarm_interval = 0;
-  p->alarm_handler = 0;
-  p->ticks_since_alarm = 0;
-  p->in_alarm_handler = 0;
 }
 
 // Create a user page table for a given process,
@@ -213,6 +207,13 @@ proc_pagetable(struct proc *p)
     return 0;
   }
 
+  if(mappages(pagetable, USYSCALL, PGSIZE, (uint64)(p->usyscall), PTE_R | PTE_U) < 0){
+    uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+    uvmunmap(pagetable, TRAPFRAME, 1, 0);
+    uvmfree(pagetable, 0);
+    return 0;
+  }
+
   return pagetable;
 }
 
@@ -223,6 +224,7 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
+  uvmunmap(pagetable, USYSCALL, 1, 0);
   uvmfree(pagetable, sz);
 }
 
