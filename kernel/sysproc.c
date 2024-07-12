@@ -1,8 +1,8 @@
 #include "types.h"
 #include "riscv.h"
-#include "param.h"
 #include "defs.h"
 #include "date.h"
+#include "param.h"
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
@@ -46,7 +46,6 @@ sys_sbrk(void)
 
   if(argint(0, &n) < 0)
     return -1;
-  
   addr = myproc()->sz;
   if(growproc(n) < 0)
     return -1;
@@ -58,7 +57,6 @@ sys_sleep(void)
 {
   int n;
   uint ticks0;
-
 
   if(argint(0, &n) < 0)
     return -1;
@@ -74,46 +72,6 @@ sys_sleep(void)
   release(&tickslock);
   return 0;
 }
-
-
-#ifdef LAB_PGTBL
-int
-sys_pgaccess(void)
-{
-  // lab pgtbl: your code here.
-  //获取参数
-  // 虚拟地址
-    uint64 vaddr;
-    if(argaddr(0,&vaddr)<0)
-        return -1;
-  //数量
-    int num;
-    if(argint(1,&num)<0)
-        return -1;
-  //储存地址
-    uint64 uaddr;  
-    if(argaddr(2,&uaddr)<0)
-        return -1;   
-
-    struct proc *p = myproc();
-    uint64 mask=0;
-    // printf("sys_pgaccess: %d %d %d\n",vaddr,num,uaddr);
-    for(int i=0;i<num;i++)
-    {
-        pte_t* pte = walk(p->pagetable,vaddr+i*PGSIZE,0);
-        if(pte && (*pte & PTE_A))
-        {
-            mask = mask | (1<<i);
-            // printf("mask=%d\n",mask);
-            *pte = (*pte) & (~PTE_A);
-        } 
-    }
-    if(copyout(p->pagetable,uaddr,(char*)&mask,sizeof(mask))<0)
-        return -1;
-    // printf("sys_pgaccess: %d %d %d\n",vaddr,num,uaddr);
-    return 0;
-}
-#endif
 
 uint64
 sys_kill(void)
