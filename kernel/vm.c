@@ -5,7 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
-
+#include "spinlock.h"
+#include "proc.h"
 /*
  * the kernel's page table.
  */
@@ -311,7 +312,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+//   char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -320,13 +321,18 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    // if((mem = kalloc()) == 0)
+    //   goto err;
+    // memmove(mem, (char*)pa, PGSIZE);
+    if(flags & PTE_W)
+    {
+        flags = (flags | PTE_COW) & (~PTE_W);
+        *pte = PA2PTE(pa) | flags;
+    }
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
       goto err;
     }
+    krefpage((void *)pa);
   }
   return 0;
 
@@ -357,6 +363,8 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   uint64 n, va0, pa0;
 
   while(len > 0){
+    if(iscowpage(dstva)) // 检查每一个被写的页是否是 COW 页
+        uvmcowcopy(dstva);
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
@@ -439,4 +447,34 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+int iscowpage(uint64 va)
+{
+    pte_t* pte;
+    struct proc* p = myproc();
+    return va < p->sz
+            && ((pte =walk(p->pagetable, va,0))!=0 && (*pte & PTE_V))
+            && (*pte & PTE_COW);
+}
+
+int uvmcowcopy(uint64 va)
+{
+    pte_t* pte;
+    struct proc* p = myproc();
+    if((pte = walk(p->pagetable, va, 0))==0)
+    {
+        panic("uvmcowcopy: walk\n");
+    }
+    uint64 pa = PTE2PA(*pte);
+    uint64 new = (uint64)kcopy_n_deref((void *)pa);
+    if(new == 0)
+        return -1;
+    // 重新映射为可写，并清除 PTE_COW 标记
+    uint64 flags = (PTE_FLAGS(*pte) | PTE_W) & ~PTE_COW;
+    uvmunmap(p->pagetable, PGROUNDDOWN(va), 1, 0); //取消映射
+    if(mappages(p->pagetable, va, 1, new, flags)==-1)  //chong映射
+        panic("uvmcowcopy: mappages\n");
+    return 0;
+
 }
