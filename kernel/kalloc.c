@@ -23,17 +23,10 @@ struct {
   struct run *freelist;
 } kmem;
 
-#define PA2PGREF_ID(p) ((p-KERNBASE)/PGSIZE)
-#define PGREF_MAX_ENTRIES PA2PGREF_ID(PHYSTOP)
-#define PA2PGERF(p) pageref[PA2PGREF_ID((uint64)p)]
-
-struct spinlock pgreflock;
-int pageref[PGREF_MAX_ENTRIES];
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
-  initlock(&pgreflock, "pgref");
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -58,8 +51,6 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
-acquire(&pgreflock);
-if(--PA2PGERF(pa)<=0){
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
@@ -69,8 +60,6 @@ if(--PA2PGERF(pa)<=0){
   r->next = kmem.freelist;
   kmem.freelist = r;
   release(&kmem.lock);
-}
-release(&pgreflock);
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -87,36 +76,7 @@ kalloc(void)
     kmem.freelist = r->next;
   release(&kmem.lock);
 
-  if(r){
+  if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
-    PA2PGERF(r)=1;
-  }
   return (void*)r;
-}
-//计数
-void krefpage(void *pa)
-{
-    acquire(&pgreflock);
-    PA2PGERF(pa)++;
-    release(&pgreflock);
-}
-void *kcopy_n_deref(void *pa)
-{
-    acquire(&pgreflock);
-    if(PA2PGERF(pa) <= 1)
-    {
-        release(&pgreflock);
-        return pa;
-    }
-    // 分配新的内存页，并复制旧页中的数据到新页
-    uint64 newpa = (uint64)kalloc();
-    if(newpa == 0)
-    {
-        release(&pgreflock);
-        return 0;
-    }
-    memmove((void *)newpa, (void *)pa, PGSIZE);
-    PA2PGERF(pa)--;
-    release(&pgreflock);
-    return (void *)newpa;
 }
