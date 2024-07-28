@@ -9,7 +9,7 @@
 #include "kernel/riscv.h"
 
 //
-// Tests xv6 system calls.   without arguments runs them all
+// Tests xv6 system calls.  usertests without arguments runs them all
 // and usertests <name> runs <name> test. The test runner creates for
 // each test a process and based on the exit status of the process,
 // the test runner reports "OK" or "FAILED".  Some tests result in
