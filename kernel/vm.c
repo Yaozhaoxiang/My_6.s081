@@ -4,8 +4,6 @@
 #include "elf.h"
 #include "riscv.h"
 #include "defs.h"
-#include "spinlock.h"
-#include "proc.h"
 #include "fs.h"
 
 /*
@@ -31,14 +29,6 @@ kvmmake(void)
 
   // virtio mmio disk interface
   kvmmap(kpgtbl, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
-
-#ifdef LAB_NET
-  // PCI-E ECAM (configuration space), for pci.c
-  kvmmap(kpgtbl, 0x30000000L, 0x30000000L, 0x10000000, PTE_R | PTE_W);
-
-  // pci.c maps the e1000's registers here.
-  kvmmap(kpgtbl, 0x40000000L, 0x40000000L, 0x20000, PTE_R | PTE_W);
-#endif  
 
   // PLIC
   kvmmap(kpgtbl, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
@@ -74,7 +64,6 @@ kvminithart()
   w_satp(MAKE_SATP(kernel_pagetable));
   sfence_vma();
 }
-
 
 // Return the address of the PTE in page table pagetable
 // that corresponds to virtual address va.  If alloc!=0,
@@ -182,10 +171,8 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
     if((pte = walk(pagetable, a, 0)) == 0)
       panic("uvmunmap: walk");
-    if((*pte & PTE_V) == 0) {
-      printf("va=%p pte=%p\n", a, *pte);
+    if((*pte & PTE_V) == 0)
       panic("uvmunmap: not mapped");
-    }
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
@@ -208,7 +195,6 @@ uvmcreate()
   memset(pagetable, 0, PGSIZE);
   return pagetable;
 }
-
 
 // Load the user initcode into address 0 of pagetable,
 // for the very first process.
@@ -376,7 +362,6 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   return 0;
 }
 
-
 // Copy from user to kernel.
 // Copy len bytes to dst from virtual address srcva in a given page table.
 // Return 0 on success, -1 on error.
@@ -384,7 +369,7 @@ int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
   uint64 n, va0, pa0;
-  
+
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
@@ -444,8 +429,3 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
-
-
-
-
-  

@@ -314,6 +314,40 @@ sys_open(void)
       end_op();
       return -1;
     }
+    int depth=0;
+    while(ip->type==T_SYMLINK)
+    {
+        if(++depth > 10)
+        {
+            iunlockput(ip);
+            end_op();
+            return -1;
+        }
+        //读取符号链接的目标路径
+        char link_target[MAXPATH];
+        if(readi(ip, 0, (uint64)link_target, 0, MAXPATH)<0)
+        {
+            iunlockput(ip);
+            end_op();
+            return -1;
+        }
+        // 如果设置了 O_NOFOLLOW 标志
+        if(omode & O_NOFOLLOW)
+        {
+            iunlockput(ip);
+            end_op();
+            return -1;
+        }
+
+        //查找符号链接指向的实际文件
+        iunlockput(ip);
+        if((ip=namei(link_target))==0)
+        {
+            end_op();
+            return -1;
+        }
+        ilock(ip);
+    }
   }
 
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
@@ -485,30 +519,30 @@ sys_pipe(void)
   return 0;
 }
 
-
-#ifdef LAB_NET
-int
-sys_connect(void)
+uint64
+sys_symlink(void)
 {
-  struct file *f;
-  int fd;
-  uint32 raddr;
-  uint32 rport;
-  uint32 lport;
-
-  if (argint(0, (int*)&raddr) < 0 ||
-      argint(1, (int*)&lport) < 0 ||
-      argint(2, (int*)&rport) < 0) {
+  char target[MAXPATH], path[MAXPATH];
+  struct inode *ip;
+  // 从用户空间获取目标路径和符号链接路径
+  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
     return -1;
-  }
 
-  if(sockalloc(&f, raddr, lport, rport) < 0)
-    return -1;
-  if((fd=fdalloc(f)) < 0){
-    fileclose(f);
-    return -1;
-  }
+  begin_op();
 
-  return fd;
+    if((ip=create(path, T_SYMLINK, 0, 0))==0)
+    {
+        end_op();
+        return -1;
+    }
+
+    // 将目标路径写入符号链接的 inode 数据块
+    if(writei(ip, 0, (uint64)target, 0, strlen(target) + 1) != strlen(target) + 1){
+        end_op();
+        return -1;
+    }
+    //解锁,因为create返回一个已锁定的 `inode`
+    iunlockput(ip);
+    end_op();
+    return 00;
 }
-#endif

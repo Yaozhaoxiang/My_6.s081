@@ -377,17 +377,20 @@ iunlockput(struct inode *ip)
 static uint
 bmap(struct inode *ip, uint bn)
 {
-  uint addr, *a;
-  struct buf *bp;
+  uint addr, *a, *a2;
+  uint addr2;
+  struct buf *bp, *bp2;
+  int n;
 
   if(bn < NDIRECT){
-    if((addr = ip->addrs[bn]) == 0)
+    if((addr = ip->addrs[bn]) == 0){
       ip->addrs[bn] = addr = balloc(ip->dev);
+    }
     return addr;
   }
   bn -= NDIRECT;
 
-  if(bn < NINDIRECT){
+  if(bn < NINDIRECT){ //12是单级间接块
     // Load indirect block, allocating if necessary.
     if((addr = ip->addrs[NDIRECT]) == 0)
       ip->addrs[NDIRECT] = addr = balloc(ip->dev);
@@ -401,6 +404,35 @@ bmap(struct inode *ip, uint bn)
     return addr;
   }
 
+bn -= NINDIRECT;
+n = bn/NINDIRECT; //bn属于哪一个一级间接块,即下标
+
+if(bn < NINDIRECT*NINDIRECT) //13双级间接块
+{
+    if((addr = ip->addrs[NDIRECT+1]) == 0) //找到二级间接块的地址
+    {
+        ip->addrs[NDIRECT+1] = addr = balloc(ip->dev);
+    }
+    //读取二级间接块的内容
+    bp = bread(ip->dev, addr); //有256个，每一个都是一个一级间接块
+    a = (uint*)bp->data;
+    //读取对应一级间接块
+    if((addr2 = a[n])==0){
+        a[n] =addr2 = balloc(ip->dev);
+        log_write(bp);
+    }
+    brelse(bp);
+    
+    bp2 = bread(ip->dev, addr2);// 读取一级间接块
+    a2 = (uint*)bp2->data;
+    if((addr2 = a2[bn%NINDIRECT]) == 0){
+        a2[bn%NINDIRECT] = addr2 = balloc(ip->dev);
+        log_write(bp2);
+    }
+    brelse(bp2);
+    return addr2;
+}
+
   panic("bmap: out of range");
 }
 
@@ -410,8 +442,8 @@ void
 itrunc(struct inode *ip)
 {
   int i, j;
-  struct buf *bp;
-  uint *a;
+  struct buf *bp, *bp2;
+  uint *a, *a2;
 
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
@@ -432,8 +464,31 @@ itrunc(struct inode *ip)
     ip->addrs[NDIRECT] = 0;
   }
 
+if(ip->addrs[NDIRECT+1])
+{
+    bp = bread(ip->dev, ip->addrs[NDIRECT+1]);
+    a = (uint*)bp->data;
+    for (i = 0; i < NINDIRECT; i++) {
+        if(a[i])
+        {
+            bp2 = bread(ip->dev, a[i]);
+            a2 = (uint*)bp2->data;
+            for(j = 0; j < NINDIRECT; j++){
+                if(a2[j])
+                    bfree(ip->dev, a2[j]);
+            }
+            brelse(bp2);
+            bfree(ip->dev, a[i]);
+        }
+    }
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT+1]);
+    ip->addrs[NDIRECT+1] = 0;
+}
+
   ip->size = 0;
   iupdate(ip);
+
 }
 
 // Copy stat information from inode.
