@@ -18,6 +18,17 @@ struct context {
   uint64 s11;
 };
 
+// mmap需要的信息
+struct vma{
+  int valid;
+  uint64 vastart;
+  uint64 sz;
+  struct file *f;
+  int prot;
+  int flags;
+  uint64 offset;
+};
+#define NVMA 16
 // Per-CPU state.
 struct cpu {
   struct proc *proc;          // The process running on this cpu, or null.
@@ -105,4 +116,5 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  struct vma vmas[NVMA];       // MMA 槽
 };
